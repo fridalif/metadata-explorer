@@ -52,27 +52,28 @@ jobs:
       uses: actions/checkout@v4
 
     - name: Install Rust
-      uses: actions-rust-lang/setup-rust-toolchain@v1
+      uses: dtolnay/rust-toolchain@stable
       with:
-        toolchain: stable
         targets: ${{ matrix.target }}
 
-    - name: Install cross-compilation tools
+    - name: Install cross-compilation tools (Linux only)
+      if: matrix.os == 'ubuntu-latest'
       run: |
-        if [ "${{ matrix.os }}" == "ubuntu-latest" ]; then
-          sudo apt-get update
-          case "${{ matrix.target }}" in
-            i686-unknown-linux-gnu)
-              sudo apt-get install -y gcc-multilib
-              ;;
-            aarch64-unknown-linux-gnu)
-              sudo apt-get install -y gcc-aarch64-linux-gnu
-              ;;
-            armv7-unknown-linux-gnueabihf)
-              sudo apt-get install -y gcc-arm-linux-gnueabihf
-              ;;
-          esac
-        fi
+        sudo apt-get update
+        case "${{ matrix.target }}" in
+          i686-unknown-linux-gnu)
+            sudo apt-get install -y gcc-multilib
+            ;;
+          aarch64-unknown-linux-gnu)
+            sudo apt-get install -y gcc-aarch64-linux-gnu
+            ;;
+          armv7-unknown-linux-gnueabihf)
+            sudo apt-get install -y gcc-arm-linux-gnueabihf
+            ;;
+        esac
+
+    - name: Add target
+      run: rustup target add ${{ matrix.target }}
 
     - name: Build release
       run: cargo build --release --target ${{ matrix.target }}
@@ -80,15 +81,27 @@ jobs:
     - name: Strip binaries (Linux)
       if: matrix.os == 'ubuntu-latest'
       run: |
-        strip target/${{ matrix.target }}/release/mde 2>/dev/null || true
+        if [ -f "target/${{ matrix.target }}/release/mde" ]; then
+          strip "target/${{ matrix.target }}/release/mde" || true
+        fi
 
     - name: Prepare artifact
       run: |
         if [ "${{ matrix.os }}" == "windows-latest" ]; then
-          cp target/${{ matrix.target }}/release/mde.exe ${{ matrix.asset_name }}
+          if [ -f "target/${{ matrix.target }}/release/mde.exe" ]; then
+            cp "target/${{ matrix.target }}/release/mde.exe" "${{ matrix.asset_name }}"
+          else
+            echo "Binary not found: target/${{ matrix.target }}/release/mde.exe"
+            exit 1
+          fi
         else
-          cp target/${{ matrix.target }}/release/mde ${{ matrix.asset_name }}
-          chmod +x ${{ matrix.asset_name }}
+          if [ -f "target/${{ matrix.target }}/release/mde" ]; then
+            cp "target/${{ matrix.target }}/release/mde" "${{ matrix.asset_name }}"
+            chmod +x "${{ matrix.asset_name }}"
+          else
+            echo "Binary not found: target/${{ matrix.target }}/release/mde"
+            exit 1
+          fi
         fi
 
     - name: Upload artifact
