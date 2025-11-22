@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fmt, fs::File, io::{Read, Seek, SeekFrom}, ptr::null};
+use std::{collections::HashMap, fmt, fs::File, io::{Read, Seek, SeekFrom, Write}, ptr::null};
 
 #[derive(PartialEq)]
 enum WorkMode {
@@ -190,6 +190,17 @@ impl PngParser {
         Ok(())
     }
 
+
+    fn make_backup(&mut self) -> Result<(), ()> {
+        let current_pos = self.file_descriptor.as_ref().unwrap().stream_position().unwrap();
+        self.file_descriptor.as_ref().unwrap().seek(SeekFrom::Start(0)).unwrap();
+        File::create(self.file.clone()+"_backup.png").unwrap();
+        std::fs::copy(self.file.clone(), self.file.clone()+"_backup.png").unwrap();
+        self.file_descriptor = Some(File::open(self.file.clone()).unwrap());
+        self.file_descriptor.as_ref().unwrap().seek(SeekFrom::Start(current_pos)).unwrap();
+        Ok(())    
+    }
+
     fn read_chunk(&mut self) -> bool {
         let mut len_bytes: [u8; 4] = [0; 4];
         self.file_descriptor.as_ref().unwrap().read(&mut len_bytes).unwrap();
@@ -219,7 +230,15 @@ impl PngParser {
         true
          
     }
-    fn write_png(&self) {}
+    fn write_png(&mut self) {
+        match self.make_backup() {
+            Ok(()) => {println!("Backup created")},
+            Err(()) => {
+                println!("Failed to create backup. Exiting...");
+                return;
+            }
+        }
+    }
     
     fn read_png(&mut self) {
         while self.read_chunk() {}
@@ -233,8 +252,24 @@ impl PngParser {
         }
     }
 
-    fn update_png(&self) {}
-    fn delete_png(&self) {}
+    fn update_png(&mut self) {
+        match self.make_backup() {
+            Ok(()) => {println!("Backup created")},
+            Err(()) => {
+                println!("Failed to create backup. Exiting...");
+                return;
+            }
+        }
+    }
+    fn delete_png(&mut self) {
+        match self.make_backup() {
+            Ok(()) => {println!("Backup created")},
+            Err(()) => {
+                println!("Failed to create backup. Exiting...");
+                return;
+            }
+        }
+    }
 
     pub fn run(&mut self) {
         if self.mode == WorkMode::Help {
