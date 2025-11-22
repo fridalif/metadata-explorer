@@ -201,7 +201,7 @@ impl PngParser {
         Ok(())    
     }
 
-    fn read_chunk(&mut self) -> bool {
+    fn read_chunk(&mut self) -> ([u8; 4], [u8; 4], Vec<u8>, [u8; 4], &u32) {
         let mut len_bytes: [u8; 4] = [0; 4];
         self.file_descriptor.as_ref().unwrap().read(&mut len_bytes).unwrap();
         let len = ((len_bytes[0] as u32) << 24) | ((len_bytes[1] as u32) << 16) | ((len_bytes[2] as u32) << 8) | (len_bytes[3] as u32);
@@ -212,22 +212,9 @@ impl PngParser {
         self.file_descriptor.as_ref().unwrap().read_exact(&mut data).unwrap();
         let mut crc32_bytes: [u8; 4] = [0; 4];
         self.file_descriptor.as_ref().unwrap().read(&mut crc32_bytes).unwrap();
-        let crc32 = ((crc32_bytes[0] as u32) << 24) | ((crc32_bytes[1] as u32) << 16) | ((crc32_bytes[2] as u32) << 8) | (crc32_bytes[3] as u32);
         self.chunk_counter.insert(type_str.clone(), self.chunk_counter.get(&type_str).unwrap_or(&0) + 1);
         let count = self.chunk_counter.get(&type_str).unwrap();
-        if self.mode == WorkMode::Read && type_str != "IDAT" {
-            println!("Found Chunk {} {}", type_str, count);
-            println!("\tlen: {}", len);
-            println!("\tdata as string: {}", String::from_utf8_lossy(&data));
-            println!("\tdata as bytes: {:?}", data);
-            println!("\tcrc32: {}", crc32);
-        } else if type_str == "IDAT" {
-            println!("Found Chunk {} {}", type_str, count);
-        }
-        if type_str == "IEND" {
-            return false;
-        }
-        true
+        return (len_bytes, type_bytes, data, crc32_bytes, &count);
          
     }
     fn write_png(&mut self) {
@@ -241,14 +228,35 @@ impl PngParser {
     }
     
     fn read_png(&mut self) {
-        while self.read_chunk() {}
+        loop {
+            let (len_bytes, type_bytes, data, crc32_bytes, count) = self.read_chunk();
+            let type_str = String::from_utf8_lossy(&type_bytes).to_string();
+            println!("----------------------------");
+            println!("Type: {}", type_str);
+            println!("Position: {}", count); 
+            println!("Length: {}", ((len_bytes[0] as u32) << 24) | ((len_bytes[1] as u32) << 16) | ((len_bytes[2] as u32) << 8) | (len_bytes[3] as u32));
+            println!("CRC32: {}", ((crc32_bytes[0] as u32) << 24) | ((crc32_bytes[1] as u32) << 16) | ((crc32_bytes[2] as u32) << 8) | (crc32_bytes[3] as u32));
+            if type_str != "IDAT" {
+                println!("Data as string: {}", String::from_utf8_lossy(&data));
+                println!("Data as bytes: {:?}", data);
+            }
+            let current_pos = self.file_descriptor.as_ref().unwrap().stream_position().unwrap();
+            if current_pos >= self.file_size {
+                break;
+            }
+            if self.chunk_type == "IEND" {
+                break;
+            }
+        }
+
         let current_pos = self.file_descriptor.as_ref().unwrap().stream_position().unwrap();
         if self.file_size != current_pos {
+            println!("----------------------------");
             println!("Found bytes at the end of file");
             let mut data: Vec<u8> = vec![0; (self.file_size - current_pos) as usize];
             self.file_descriptor.as_ref().unwrap().read_exact(&mut data).unwrap();
-            println!("\tdata as string: {}", String::from_utf8_lossy(&data));
-            println!("\tdata as bytes: {:?}", data);
+            println!("Data as string: {}", String::from_utf8_lossy(&data));
+            println!("Data as bytes: {:?}", data);
         }
     }
 
