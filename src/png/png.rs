@@ -1,3 +1,4 @@
+use std::fmt;
 
 #[derive(PartialEq)]
 enum WorkMode {
@@ -8,12 +9,26 @@ enum WorkMode {
     Help
 }
 
+impl fmt::Display for WorkMode {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            WorkMode::Read => write!(f, "Read"),
+            WorkMode::Write => write!(f, "Write"),
+            WorkMode::Update => write!(f, "Update"),
+            WorkMode::Delete => write!(f, "Delete"),
+            WorkMode::Help => write!(f, "Help"),
+        }
+    }
+}
+
+
+
 pub struct PngParser {
     mode: WorkMode,
     data: Vec<u8>,
     chunk_type: String,
     shift: u32,
-    file: Vec<String>
+    file:String
 }
 
 impl PngParser {
@@ -23,7 +38,7 @@ impl PngParser {
             data: Vec::new(),
             chunk_type: String::new(),
             shift: 0,
-            file: Vec::new()
+            file: String::new()
         }
     }
 
@@ -68,7 +83,7 @@ impl PngParser {
                     println!("No filename provided");
                     return;
                 }
-                self.file.push(flags[i + 1].clone());
+                self.file = flags[i + 1].clone();
                 continue;
             }
             if flags[i] == "--chunk_type" {
@@ -108,7 +123,7 @@ impl PngParser {
             }
         }
     }
-    fn print_help(self) {
+    fn print_help(&self) {
         println!("Usage: mde png <options>");
         println!("\tOptions:");
         println!("\t\t--read");
@@ -124,10 +139,49 @@ impl PngParser {
         println!();
         println!("For more information read README.md");
     }
-    pub fn run(self) {
+
+    fn validate_params(&self) -> Result<(), ()> {
+        if self.file == "" {
+            println!("No filename provided");
+            self.print_help();
+            return Err(());
+        }
+        if self.mode == WorkMode::Read {
+            return Ok(());
+        }
+        if self.chunk_type == "" {
+            println!("No chunk type provided");
+            self.print_help();
+            return Err(());
+        }
+        if self.mode == WorkMode::Delete {
+            return Ok(());
+        }
+        if self.data.len() == 0 {
+            println!("No data provided");
+            self.print_help();
+            return Err(());
+        }
+        Ok(())
+    }
+
+    pub fn run(&self) {
         if self.mode == WorkMode::Help {
             self.print_help();
             return;
+        }
+        match self.validate_params() {
+            Ok(()) => {
+                println!("Program started with params:");
+                println!("\tmode: {}", self.mode.to_string());
+                println!("\tfile: {}", self.file);
+                println!("\tchunk_type: {}", self.chunk_type);
+                println!("\tshift: {}", self.shift);
+                println!("\tdata: {:?}", self.data);
+            }
+            Err(()) => {
+                return;
+            }
         }
     }
 }
