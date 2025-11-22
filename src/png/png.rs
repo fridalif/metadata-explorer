@@ -197,14 +197,16 @@ impl PngParser {
 
     fn make_output(&mut self) -> Result<(), ()> {
         self.file_descriptor_write = Some(File::create(self.file.clone()+"_output").unwrap());
+        let sign = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A] as [u8; 8];
+        self.file_descriptor_write.as_ref().unwrap().write(&sign).unwrap();
         Ok(())    
     }
 
     fn read_chunk(&mut self) -> ([u8; 4], [u8; 4], Vec<u8>, [u8; 4], &u32) {
-        let mut len_bytes: [u8; 4] = [0; 4];
+        let mut len_bytes: [u8; 4] = [0u8; 4];
         self.file_descriptor_read.as_ref().unwrap().read(&mut len_bytes).unwrap();
         let len = ((len_bytes[0] as u32) << 24) | ((len_bytes[1] as u32) << 16) | ((len_bytes[2] as u32) << 8) | (len_bytes[3] as u32);
-        let mut type_bytes: [u8; 4] = [0; 4];
+        let mut type_bytes: [u8; 4] = [0u8; 4];
         self.file_descriptor_read.as_ref().unwrap().read(&mut type_bytes).unwrap();
         let type_str = String::from_utf8_lossy(&type_bytes).to_string();
         let mut data: Vec<u8> = vec![0; len as usize];
@@ -306,14 +308,14 @@ impl PngParser {
     }
 
     fn make_inserting_bytes(&mut self) -> Vec<u8> {
-        let mut len_bytes = [0u8, 4];
+        let mut len_bytes = [0u8; 4];
         let data_len = self.data.len() as u32;
         len_bytes[0] = (data_len as u32 >> 24) as u8;
         len_bytes[1] = (data_len as u32 >> 16) as u8;
         len_bytes[2] = (data_len as u32 >> 8) as u8;
         len_bytes[3] = (data_len as u32) as u8;
 
-        let mut type_bytes = [0u8, 4];
+        let mut type_bytes = [0u8; 4];
         type_bytes[0] = self.chunk_type.as_bytes()[0];
         type_bytes[1] = self.chunk_type.as_bytes()[1];
         type_bytes[2] = self.chunk_type.as_bytes()[2];
