@@ -1,4 +1,4 @@
-use std::fmt;
+use std::{collections::HashMap, fmt, fs::File, io::Read, ptr::null};
 
 #[derive(PartialEq)]
 enum WorkMode {
@@ -28,7 +28,9 @@ pub struct PngParser {
     data: Vec<u8>,
     chunk_type: String,
     shift: u32,
-    file:String
+    file:String,
+    chunk_counter: HashMap<String, u32>,
+    file_descriptor: Option<File>
 }
 
 impl PngParser {
@@ -38,7 +40,9 @@ impl PngParser {
             data: Vec::new(),
             chunk_type: String::new(),
             shift: 0,
-            file: String::new()
+            file: String::new(),
+            chunk_counter: HashMap::new(),
+            file_descriptor: None
         }
     }
 
@@ -165,7 +169,17 @@ impl PngParser {
         Ok(())
     }
 
-    pub fn run(&self) {
+    fn read_chunk(&self) {}
+    fn write_png(&self) {}
+    
+    fn read_png(&self) {
+
+    }
+
+    fn update_png(&self) {}
+    fn delete_png(&self) {}
+
+    pub fn run(&mut self) {
         if self.mode == WorkMode::Help {
             self.print_help();
             return;
@@ -183,5 +197,24 @@ impl PngParser {
                 return;
             }
         }
+        self.file_descriptor = Some(File::open(self.file.clone()).unwrap());
+        if self.file_descriptor.is_none() {
+            println!("Cant open file");
+            return;
+        }
+        let mut signature = [0u8; 8];
+        self.file_descriptor.as_ref().unwrap().read_exact(&mut signature).unwrap();
+        if signature != [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A] {
+            println!("File is not png");
+            return;
+        }
+        match self.mode {
+            WorkMode::Read => self.read_png(),
+            WorkMode::Write => self.write_png(),
+            WorkMode::Update => self.update_png(),
+            WorkMode::Delete => self.delete_png(),
+            WorkMode::Help => self.print_help(),
+        }
+
     }
 }
