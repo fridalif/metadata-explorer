@@ -27,7 +27,8 @@ pub struct PngParser {
     mode: WorkMode,
     data: Vec<u8>,
     chunk_type: String,
-    shift: u32,
+    offset: u32,
+    position: u32,
     file:String,
     chunk_counter: HashMap<String, u32>,
     file_descriptor: Option<File>,
@@ -40,7 +41,8 @@ impl PngParser {
             mode: WorkMode::Help,
             data: Vec::new(),
             chunk_type: String::new(),
-            shift: 0,
+            offset: 0,
+            position: 1,
             file: String::new(),
             chunk_counter: HashMap::new(),
             file_descriptor: None,
@@ -101,13 +103,22 @@ impl PngParser {
                 self.chunk_type = flags[i + 1].clone();
                 continue;
             }
-            if flags[i] == "--shift" {
+            if flags[i] == "--offset" {
                 if i + 1 > vec_len {
                     self.mode = WorkMode::Help;
-                    println!("No shift provided");
+                    println!("No offset provided");
                     return;
                 }
-                self.shift = flags[i + 1].parse().unwrap();
+                self.offset = flags[i + 1].parse().unwrap();
+                continue;
+            }
+            if flags[i] == "--position" {
+                if i + 1 > vec_len {
+                    self.mode = WorkMode::Help;
+                    println!("No position provided");
+                    return;
+                }
+                self.position = flags[i + 1].parse().unwrap();
                 continue;
             }
             if flags[i] == "--data" {
@@ -138,7 +149,8 @@ impl PngParser {
         println!("\t\t--delete");
         println!("\t\t(read/write/update/delete)--filename <filename:string>");
         println!("\t\t(write/update/delete)--chunk_type <chunk_type:string>");
-        println!("\t\t(write/update/delete)--shift <shift:number>(shift equals zero by default, shift means position of operating chunk in equal chunk type list)");
+        println!("\t\t(write)--offset <offset:number>(offset equals zero by default, means offset in list of chunks with equal type)");
+        println!("\t\t(delete/update)--position <position:number>(equals one by default, position in list of chunks with equal type, starts from 1)");
         println!("\t\t(write/update)--data <bytes:string>(sequence of integers associated to bytes separated by ',')");
         println!("Example:");
         println!("mde png --write --chunk_type tEXt --data 1,23,44,32,2 --filename test.png --shift 1");
@@ -160,23 +172,65 @@ impl PngParser {
             self.print_help();
             return Err(());
         }
-        if self.mode == WorkMode::Delete {
-            return Ok(());
+        if self.mode == WorkMode::Delete || self.mode == WorkMode::Update {
+            if self.position == 0 {
+                println!("No position provided");
+                self.print_help();
+                return Err(());
+            }
         }
-        if self.data.len() == 0 {
-            println!("No data provided");
-            self.print_help();
-            return Err(());
+        if self.mode == WorkMode::Write || self.mode == WorkMode::Update {
+            if self.data.len() == 0 {
+                println!("No data provided");
+                self.print_help();
+                return Err(());
+            }    
         }
+        
         Ok(())
     }
 
-    fn read_chunk(&self) -> bool {}
+    fn read_chunk(&mut self) -> bool {
+        let mut len_bytes: [u8; 4] = [0; 4];
+        self.file_descriptor.as_ref().unwrap().read(&mut len_bytes).unwrap();
+        let len = ((len_bytes[0] as u32) << 24) | ((len_bytes[1] as u32) << 16) | ((len_bytes[2] as u32) << 8) | (len_bytes[3] as u32);
+        let mut type_bytes: [u8; 4] = [0; 4];
+        self.file_descriptor.as_ref().unwrap().read(&mut type_bytes).unwrap();
+        let type_str = String::from_utf8_lossy(&type_bytes).to_string();
+        let mut data: Vec<u8> = vec![0; len as usize];
+        self.file_descriptor.as_ref().unwrap().read_exact(&mut data).unwrap();
+        let mut crc32_bytes: [u8; 4] = [0; 4];
+        self.file_descriptor.as_ref().unwrap().read(&mut crc32_bytes).unwrap();
+        let crc32 = ((crc32_bytes[0] as u32) << 24) | ((crc32_bytes[1] as u32) << 16) | ((crc32_bytes[2] as u32) << 8) | (crc32_bytes[3] as u32);
+        self.chunk_counter.insert(type_str.clone(), self.chunk_counter.get(&type_str).unwrap_or(&0) + 1);
+        let count = self.chunk_counter.get(&type_str).unwrap();
+        if self.mode == WorkMode::Read && type_str != "IDAT" {
+            println!("Found Chunk {} {}", type_str, count);
+            println!("\tlen: {}", len);
+            println!("\tdata as string: {}", String::from_utf8_lossy(&data));
+            println!("\tdata as bytes: {:?}", data);
+            println!("\tcrc32: {}", crc32);
+        } else if type_str == "IDAT" {
+            println!("Found Chunk {} {}", type_str, count);
+        }
+        if type_str == "IEND" {
+            return false;
+        }
+        true
+         
+    }
     fn write_png(&self) {}
     
-    fn read_png(&self) {
+    fn read_png(&mut self) {
         while self.read_chunk() {}
-        if self.file_descriptor.
+        let current_pos = self.file_descriptor.as_ref().unwrap().stream_position().unwrap();
+        if self.file_size != current_pos {
+            println!("Found bytes at the end of file");
+            let mut data: Vec<u8> = vec![0; (self.file_size - current_pos) as usize];
+            self.file_descriptor.as_ref().unwrap().read_exact(&mut data).unwrap();
+            println!("\tdata as string: {}", String::from_utf8_lossy(&data));
+            println!("\tdata as bytes: {:?}", data);
+        }
     }
 
     fn update_png(&self) {}
@@ -193,7 +247,8 @@ impl PngParser {
                 println!("\tmode: {}", self.mode.to_string());
                 println!("\tfile: {}", self.file);
                 println!("\tchunk_type: {}", self.chunk_type);
-                println!("\tshift: {}", self.shift);
+                println!("\toffset: {}", self.offset);
+                println!("\tposition: {}", self.position);
                 println!("\tdata: {:?}", self.data);
             }
             Err(()) => {
