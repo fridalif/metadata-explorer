@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fmt, fs::File, io::Read, ptr::null};
+use std::{collections::HashMap, fmt, fs::File, io::{Read, Seek, SeekFrom}, ptr::null};
 
 #[derive(PartialEq)]
 enum WorkMode {
@@ -30,7 +30,8 @@ pub struct PngParser {
     shift: u32,
     file:String,
     chunk_counter: HashMap<String, u32>,
-    file_descriptor: Option<File>
+    file_descriptor: Option<File>,
+    file_size: u64
 }
 
 impl PngParser {
@@ -42,7 +43,8 @@ impl PngParser {
             shift: 0,
             file: String::new(),
             chunk_counter: HashMap::new(),
-            file_descriptor: None
+            file_descriptor: None,
+            file_size: 0
         }
     }
 
@@ -169,11 +171,12 @@ impl PngParser {
         Ok(())
     }
 
-    fn read_chunk(&self) {}
+    fn read_chunk(&self) -> bool {}
     fn write_png(&self) {}
     
     fn read_png(&self) {
-
+        while self.read_chunk() {}
+        if self.file_descriptor.
     }
 
     fn update_png(&self) {}
@@ -202,6 +205,11 @@ impl PngParser {
             println!("Cant open file");
             return;
         }
+        
+        let current_pos = self.file_descriptor.as_ref().unwrap().stream_position().unwrap();
+        self.file_size = self.file_descriptor.as_ref().unwrap().seek(SeekFrom::End(0)).unwrap();
+        self.file_descriptor.as_ref().unwrap().seek(SeekFrom::Start(current_pos)).unwrap();
+        
         let mut signature = [0u8; 8];
         self.file_descriptor.as_ref().unwrap().read_exact(&mut signature).unwrap();
         if signature != [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A] {
