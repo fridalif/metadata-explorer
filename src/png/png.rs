@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fmt, fs::File, io::{Read, Seek, SeekFrom, Write}, ptr::null};
+use std::{collections::HashMap, fmt, fs::File, io::{Read, Seek, SeekFrom, Write}};
 use crc::{Crc, CRC_32_ISO_HDLC};
 
 #[derive(PartialEq)]
@@ -33,7 +33,8 @@ pub struct PngParser {
     position: u32,
     file:String,
     chunk_counter: HashMap<String, u32>,
-    file_descriptor: Option<File>,
+    file_descriptor_read: Option<File>,
+    file_descriptor_write: Option<File>,
     file_size: u64
 }
 
@@ -47,7 +48,8 @@ impl PngParser {
             position: 1,
             file: String::new(),
             chunk_counter: HashMap::new(),
-            file_descriptor: None,
+            file_descriptor_read: None,
+            file_descriptor_write: None,
             file_size: 0
         }
     }
@@ -193,40 +195,75 @@ impl PngParser {
     }
 
 
-    fn make_backup(&mut self) -> Result<(), ()> {
-        let current_pos = self.file_descriptor.as_ref().unwrap().stream_position().unwrap();
-        self.file_descriptor.as_ref().unwrap().seek(SeekFrom::Start(0)).unwrap();
-        File::create(self.file.clone()+"_backup.png").unwrap();
-        std::fs::copy(self.file.clone(), self.file.clone()+"_backup.png").unwrap();
-        self.file_descriptor = Some(File::open(self.file.clone()).unwrap());
-        self.file_descriptor.as_ref().unwrap().seek(SeekFrom::Start(current_pos)).unwrap();
+    fn make_output(&mut self) -> Result<(), ()> {
+        self.file_descriptor_write = Some(File::create(self.file.clone()+"_output").unwrap());
         Ok(())    
     }
 
     fn read_chunk(&mut self) -> ([u8; 4], [u8; 4], Vec<u8>, [u8; 4], &u32) {
         let mut len_bytes: [u8; 4] = [0; 4];
-        self.file_descriptor.as_ref().unwrap().read(&mut len_bytes).unwrap();
+        self.file_descriptor_read.as_ref().unwrap().read(&mut len_bytes).unwrap();
         let len = ((len_bytes[0] as u32) << 24) | ((len_bytes[1] as u32) << 16) | ((len_bytes[2] as u32) << 8) | (len_bytes[3] as u32);
         let mut type_bytes: [u8; 4] = [0; 4];
-        self.file_descriptor.as_ref().unwrap().read(&mut type_bytes).unwrap();
+        self.file_descriptor_read.as_ref().unwrap().read(&mut type_bytes).unwrap();
         let type_str = String::from_utf8_lossy(&type_bytes).to_string();
         let mut data: Vec<u8> = vec![0; len as usize];
-        self.file_descriptor.as_ref().unwrap().read_exact(&mut data).unwrap();
+        self.file_descriptor_read.as_ref().unwrap().read_exact(&mut data).unwrap();
         let mut crc32_bytes: [u8; 4] = [0; 4];
-        self.file_descriptor.as_ref().unwrap().read(&mut crc32_bytes).unwrap();
+        self.file_descriptor_read.as_ref().unwrap().read(&mut crc32_bytes).unwrap();
         self.chunk_counter.insert(type_str.clone(), self.chunk_counter.get(&type_str).unwrap_or(&0) + 1);
         let count = self.chunk_counter.get(&type_str).unwrap();
         return (len_bytes, type_bytes, data, crc32_bytes, &count);
          
     }
     fn write_png(&mut self) {
-        match self.make_backup() {
-            Ok(()) => {println!("Backup created")},
+        match self.make_output() {
+            Ok(()) => {println!("Output created")},
             Err(()) => {
-                println!("Failed to create backup. Exiting...");
+                println!("Failed to create output. Exiting...");
                 return;
             }
         }
+        let chunk_type = self.chunk_type.clone();
+        let offset = self.offset;
+        let mut written = false;
+        loop {
+            let (len_bytes, type_bytes, data, crc32_bytes, count) = self.read_chunk();
+            let type_str = String::from_utf8_lossy(&type_bytes).to_string();
+            if ((type_str == chunk_type && offset == *count) || ( type_str == "IHDR" &&offset == 0) ) && !written {
+                written = true;
+                let payload = self.make_inserting_bytes();
+                self.file_descriptor_write.as_ref().unwrap().write(&len_bytes).unwrap();
+                self.file_descriptor_write.as_ref().unwrap().write(&type_bytes).unwrap();
+                self.file_descriptor_write.as_ref().unwrap().write(&data).unwrap();
+                self.file_descriptor_write.as_ref().unwrap().write(&crc32_bytes).unwrap();
+                self.file_descriptor_write.as_ref().unwrap().write(&payload).unwrap();
+                let current_pos = self.file_descriptor_read.as_ref().unwrap().stream_position().unwrap();
+                if current_pos >= self.file_size || self.file_descriptor_read.is_none() {
+                    break;
+                }
+                continue;
+            }
+            self.file_descriptor_write.as_ref().unwrap().write(&len_bytes).unwrap();
+            self.file_descriptor_write.as_ref().unwrap().write(&type_bytes).unwrap();
+            self.file_descriptor_write.as_ref().unwrap().write(&data).unwrap();
+            self.file_descriptor_write.as_ref().unwrap().write(&crc32_bytes).unwrap();
+            let current_pos = self.file_descriptor_read.as_ref().unwrap().stream_position().unwrap();
+            if current_pos >= self.file_size || self.file_descriptor_read.is_none() || type_str == "IEND" {
+                break;
+            }
+        }
+        let current_pos = self.file_descriptor_read.as_ref().unwrap().stream_position().unwrap();
+        if current_pos < self.file_size  { 
+            let other_data: Vec<u8> = vec![0; (self.file_size - current_pos) as usize];
+            self.file_descriptor_write.as_ref().unwrap().write(&other_data).unwrap();
+        }
+        if written {
+            println!("Chunk inserted");
+        } else {
+            println!("Chunk not inserted");
+        }
+
     }
     
     fn read_png(&mut self) {
@@ -242,8 +279,8 @@ impl PngParser {
                 println!("Data as string: {}", String::from_utf8_lossy(&data));
                 println!("Data as bytes: {:?}", data);
             }
-            let current_pos = self.file_descriptor.as_ref().unwrap().stream_position().unwrap();
-            if current_pos >= self.file_size || self.file_descriptor.is_none() {
+            let current_pos = self.file_descriptor_read.as_ref().unwrap().stream_position().unwrap();
+            if current_pos >= self.file_size || self.file_descriptor_read.is_none() {
                 break;
             }
             if self.chunk_type == "IEND" {
@@ -251,12 +288,12 @@ impl PngParser {
             }
         }
 
-        let current_pos = self.file_descriptor.as_ref().unwrap().stream_position().unwrap();
+        let current_pos = self.file_descriptor_read.as_ref().unwrap().stream_position().unwrap();
         if self.file_size != current_pos {
             println!("----------------------------");
             println!("Found bytes at the end of file");
             let mut data: Vec<u8> = vec![0; (self.file_size - current_pos) as usize];
-            self.file_descriptor.as_ref().unwrap().read_exact(&mut data).unwrap();
+            self.file_descriptor_read.as_ref().unwrap().read_exact(&mut data).unwrap();
             println!("Data as string: {}", String::from_utf8_lossy(&data));
             println!("Data as bytes: {:?}", data);
         }
@@ -296,10 +333,10 @@ impl PngParser {
     }
 
     fn update_png(&mut self) {
-        match self.make_backup() {
-            Ok(()) => {println!("Backup created")},
+        match self.make_output() {
+            Ok(()) => {println!("Output created")},
             Err(()) => {
-                println!("Failed to create backup. Exiting...");
+                println!("Failed to create output. Exiting...");
                 return;
             }
         }
@@ -312,17 +349,22 @@ impl PngParser {
             if type_str == chunk_type && position == *count && !found {
                 found = true;
                 let payload = self.make_inserting_bytes();
-                self.file_descriptor.as_ref().unwrap().write(&payload).unwrap();
+                self.file_descriptor_write.as_ref().unwrap().write(&payload).unwrap();
                 continue;
             }
-            self.file_descriptor.as_ref().unwrap().write(&len_bytes).unwrap();
-            self.file_descriptor.as_ref().unwrap().write(&type_bytes).unwrap();
-            self.file_descriptor.as_ref().unwrap().write(&data).unwrap();
-            self.file_descriptor.as_ref().unwrap().write(&crc32_bytes).unwrap();
-            let current_pos = self.file_descriptor.as_ref().unwrap().stream_position().unwrap();
-            if current_pos >= self.file_size || self.file_descriptor.is_none() {
+            self.file_descriptor_write.as_ref().unwrap().write(&len_bytes).unwrap();
+            self.file_descriptor_write.as_ref().unwrap().write(&type_bytes).unwrap();
+            self.file_descriptor_write.as_ref().unwrap().write(&data).unwrap();
+            self.file_descriptor_write.as_ref().unwrap().write(&crc32_bytes).unwrap();
+            let current_pos = self.file_descriptor_read.as_ref().unwrap().stream_position().unwrap();
+            if current_pos >= self.file_size || self.file_descriptor_read.is_none() {
                 break;
             }
+        }
+        let current_pos = self.file_descriptor_read.as_ref().unwrap().stream_position().unwrap();
+        if current_pos < self.file_size  { 
+            let other_data: Vec<u8> = vec![0; (self.file_size - current_pos) as usize];
+            self.file_descriptor_write.as_ref().unwrap().write(&other_data).unwrap();
         }
         if found {
             println!("Chunk updated");
@@ -332,10 +374,10 @@ impl PngParser {
 
     }
     fn delete_png(&mut self) {
-        match self.make_backup() {
-            Ok(()) => {println!("Backup created")},
+        match self.make_output() {
+            Ok(()) => {println!("Output created")},
             Err(()) => {
-                println!("Failed to create backup. Exiting...");
+                println!("Failed to create output.. Exiting...");
                 return;
             }
         }
@@ -349,14 +391,19 @@ impl PngParser {
                 found = true;
                 continue;
             }
-            self.file_descriptor.as_ref().unwrap().write(&len_bytes).unwrap();
-            self.file_descriptor.as_ref().unwrap().write(&type_bytes).unwrap();
-            self.file_descriptor.as_ref().unwrap().write(&data).unwrap();
-            self.file_descriptor.as_ref().unwrap().write(&crc32_bytes).unwrap();
-            let current_pos = self.file_descriptor.as_ref().unwrap().stream_position().unwrap();
-            if current_pos >= self.file_size || self.file_descriptor.is_none() {
+            self.file_descriptor_write.as_ref().unwrap().write(&len_bytes).unwrap();
+            self.file_descriptor_write.as_ref().unwrap().write(&type_bytes).unwrap();
+            self.file_descriptor_write.as_ref().unwrap().write(&data).unwrap();
+            self.file_descriptor_write.as_ref().unwrap().write(&crc32_bytes).unwrap();
+            let current_pos = self.file_descriptor_read.as_ref().unwrap().stream_position().unwrap();
+            if current_pos >= self.file_size || self.file_descriptor_read.is_none() {
                 break;
             }
+        }
+        let current_pos = self.file_descriptor_read.as_ref().unwrap().stream_position().unwrap();
+        if current_pos < self.file_size  { 
+            let other_data: Vec<u8> = vec![0; (self.file_size - current_pos) as usize];
+            self.file_descriptor_write.as_ref().unwrap().write(&other_data).unwrap();
         }
         if found {
             println!("Chunk deleted");
@@ -385,18 +432,18 @@ impl PngParser {
                 return;
             }
         }
-        self.file_descriptor = Some(File::open(self.file.clone()).unwrap());
-        if self.file_descriptor.is_none() {
+        self.file_descriptor_read = Some(File::open(self.file.clone()).unwrap());
+        if self.file_descriptor_read.is_none() {
             println!("Cant open file");
             return;
         }
         
-        let current_pos = self.file_descriptor.as_ref().unwrap().stream_position().unwrap();
-        self.file_size = self.file_descriptor.as_ref().unwrap().seek(SeekFrom::End(0)).unwrap();
-        self.file_descriptor.as_ref().unwrap().seek(SeekFrom::Start(current_pos)).unwrap();
+        let current_pos = self.file_descriptor_read.as_ref().unwrap().stream_position().unwrap();
+        self.file_size = self.file_descriptor_read.as_ref().unwrap().seek(SeekFrom::End(0)).unwrap();
+        self.file_descriptor_read.as_ref().unwrap().seek(SeekFrom::Start(current_pos)).unwrap();
         
         let mut signature = [0u8; 8];
-        self.file_descriptor.as_ref().unwrap().read_exact(&mut signature).unwrap();
+        self.file_descriptor_read.as_ref().unwrap().read_exact(&mut signature).unwrap();
         if signature != [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A] {
             println!("File is not png");
             return;
