@@ -16,8 +16,9 @@ fn main() {
 
     for arg in &args {
         if arg == "--png" {
-            let png_parser = PngParser::new();
+            let mut png_parser = PngParser::new();
             png_parser.parse(&args);
+            png_parser.run();
             return;
         }
     }
