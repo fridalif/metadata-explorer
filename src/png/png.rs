@@ -1,4 +1,5 @@
 use std::{collections::HashMap, fmt, fs::File, io::{Read, Seek, SeekFrom, Write}, ptr::null};
+use crc::{Crc, CRC_32_ISO_HDLC};
 
 #[derive(PartialEq)]
 enum WorkMode {
@@ -21,6 +22,7 @@ impl fmt::Display for WorkMode {
     }
 }
 
+const PNG_CRC: Crc<u32> = Crc::<u32>::new(&CRC_32_ISO_HDLC);
 
 
 pub struct PngParser {
@@ -241,7 +243,7 @@ impl PngParser {
                 println!("Data as bytes: {:?}", data);
             }
             let current_pos = self.file_descriptor.as_ref().unwrap().stream_position().unwrap();
-            if current_pos >= self.file_size {
+            if current_pos >= self.file_size || self.file_descriptor.is_none() {
                 break;
             }
             if self.chunk_type == "IEND" {
@@ -260,6 +262,39 @@ impl PngParser {
         }
     }
 
+    fn crc32(&self, data: &[u8]) -> [u8; 4] {
+        let crc = PNG_CRC.checksum(data);
+        let crc_bytes = crc.to_be_bytes();
+        return crc_bytes;
+    }
+
+    fn make_inserting_bytes(&mut self) -> Vec<u8> {
+        let mut len_bytes = [0u8, 4];
+        let data_len = self.data.len() as u32;
+        len_bytes[0] = (data_len as u32 >> 24) as u8;
+        len_bytes[1] = (data_len as u32 >> 16) as u8;
+        len_bytes[2] = (data_len as u32 >> 8) as u8;
+        len_bytes[3] = (data_len as u32) as u8;
+
+        let mut type_bytes = [0u8, 4];
+        type_bytes[0] = self.chunk_type.as_bytes()[0];
+        type_bytes[1] = self.chunk_type.as_bytes()[1];
+        type_bytes[2] = self.chunk_type.as_bytes()[2];
+        type_bytes[3] = self.chunk_type.as_bytes()[3];
+
+        let mut temp_data: Vec<u8> = Vec::new();
+        temp_data.extend_from_slice(&type_bytes);
+        temp_data.extend_from_slice(&self.data);
+        let crc32_bytes = self.crc32(&temp_data);
+        let mut result_data: Vec<u8> = Vec::new();
+        result_data.extend_from_slice(&len_bytes);
+        result_data.extend_from_slice(&type_bytes);
+        result_data.extend_from_slice(&self.data);
+        result_data.extend_from_slice(&crc32_bytes);
+        return result_data;
+            
+    }
+
     fn update_png(&mut self) {
         match self.make_backup() {
             Ok(()) => {println!("Backup created")},
@@ -268,6 +303,33 @@ impl PngParser {
                 return;
             }
         }
+        let chunk_type = self.chunk_type.clone();
+        let position = self.position;
+        let mut found = false; 
+        loop {
+            let (len_bytes, type_bytes, data, crc32_bytes, count) = self.read_chunk();
+            let type_str = String::from_utf8_lossy(&type_bytes).to_string();
+            if type_str == chunk_type && position == *count && !found {
+                found = true;
+                let payload = self.make_inserting_bytes();
+                self.file_descriptor.as_ref().unwrap().write(&payload).unwrap();
+                continue;
+            }
+            self.file_descriptor.as_ref().unwrap().write(&len_bytes).unwrap();
+            self.file_descriptor.as_ref().unwrap().write(&type_bytes).unwrap();
+            self.file_descriptor.as_ref().unwrap().write(&data).unwrap();
+            self.file_descriptor.as_ref().unwrap().write(&crc32_bytes).unwrap();
+            let current_pos = self.file_descriptor.as_ref().unwrap().stream_position().unwrap();
+            if current_pos >= self.file_size || self.file_descriptor.is_none() {
+                break;
+            }
+        }
+        if found {
+            println!("Chunk updated");
+        } else {
+            println!("Chunk not found");
+        }
+
     }
     fn delete_png(&mut self) {
         match self.make_backup() {
