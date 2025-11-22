@@ -339,6 +339,31 @@ impl PngParser {
                 return;
             }
         }
+        let chunk_type = self.chunk_type.clone();
+        let position = self.position;
+        let mut found = false; 
+        loop {
+            let (len_bytes, type_bytes, data, crc32_bytes, count) = self.read_chunk();
+            let type_str = String::from_utf8_lossy(&type_bytes).to_string();
+            if type_str == chunk_type && position == *count && !found {
+                found = true;
+                continue;
+            }
+            self.file_descriptor.as_ref().unwrap().write(&len_bytes).unwrap();
+            self.file_descriptor.as_ref().unwrap().write(&type_bytes).unwrap();
+            self.file_descriptor.as_ref().unwrap().write(&data).unwrap();
+            self.file_descriptor.as_ref().unwrap().write(&crc32_bytes).unwrap();
+            let current_pos = self.file_descriptor.as_ref().unwrap().stream_position().unwrap();
+            if current_pos >= self.file_size || self.file_descriptor.is_none() {
+                break;
+            }
+        }
+        if found {
+            println!("Chunk deleted");
+        } else {
+            println!("Chunk not found");
+        }
+
     }
 
     pub fn run(&mut self) {
