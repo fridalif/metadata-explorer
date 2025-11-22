@@ -12,7 +12,7 @@ pub struct PngParser {
     mode: WorkMode,
     data: Vec<u8>,
     chunk_type: String,
-    position: u32,
+    shift: u32,
     file: Vec<String>
 }
 
@@ -22,10 +22,23 @@ impl PngParser {
             mode: WorkMode::Help,
             data: Vec::new(),
             chunk_type: String::new(),
-            position: 0,
+            shift: 0,
             file: Vec::new()
         }
     }
+
+    fn parse_data(&mut self, input: String) -> Result<(), ()> {
+            let separated_input = input.split(",").collect::<Vec<&str>>();
+            for i in 0..separated_input.len() {
+                let num = separated_input[i].parse::<u8>();
+                match num {
+                    Ok(n) => self.data.push(n),
+                    Err(_) => return Err(())
+                }
+            }
+            Ok(())
+    }
+
     pub fn parse(&mut self, flags: &Vec<String>) {
         let vec_len = flags.len();
         for i in 0..vec_len {
@@ -67,13 +80,13 @@ impl PngParser {
                 self.chunk_type = flags[i + 1].clone();
                 continue;
             }
-            if flags[i] == "--position" {
+            if flags[i] == "--shift" {
                 if i + 1 > vec_len {
                     self.mode = WorkMode::Help;
-                    println!("No position provided");
+                    println!("No shift provided");
                     return;
                 }
-                self.position = flags[i + 1].parse().unwrap();
+                self.shift = flags[i + 1].parse().unwrap();
                 continue;
             }
             if flags[i] == "--data" {
@@ -82,10 +95,39 @@ impl PngParser {
                     println!("No data provided");
                     return;
                 }
-                self.data = flags[i + 1].clone().into_bytes();
+                let result = self.parse_data(flags[i + 1].clone());
+                match result {
+                    Ok(_)=>{},
+                    Err(_)=> {
+                        self.mode = WorkMode::Help;
+                        println!("Invalid data provided");
+                        return;
+                    }
+                }
                 continue;
             }
         }
     }
-    pub fn run(self) {}
+    fn print_help(self) {
+        println!("Usage: mde png <options>");
+        println!("\tOptions:");
+        println!("\t\t--read");
+        println!("\t\t--write");
+        println!("\t\t--update");
+        println!("\t\t--delete");
+        println!("\t\t(read/write/update/delete)--filename <filename:string>");
+        println!("\t\t(write/update/delete)--chunk_type <chunk_type:string>");
+        println!("\t\t(write/update/delete)--shift <shift:number>(shift equals zero by default, shift means position of operating chunk in equal chunk type list)");
+        println!("\t\t(write/update)--data <bytes:string>(sequence of integers associated to bytes separated by ',')");
+        println!("Example:");
+        println!("mde png --write --chunk_type tEXt --data 1,23,44,32,2 --filename test.png --shift 1");
+        println!();
+        println!("For more information read README.md");
+    }
+    pub fn run(self) {
+        if self.mode == WorkMode::Help {
+            self.print_help();
+            return;
+        }
+    }
 }
