@@ -5,7 +5,6 @@ on:
     tags: ['v*']
   workflow_dispatch:
 
-
 jobs:
   release:
     name: Release - ${{ matrix.platform.os-name }}
@@ -36,12 +35,22 @@ jobs:
             runs-on: macOS-latest
             target: x86_64-apple-darwin
 
-          # more targets here ...
-
     runs-on: ${{ matrix.platform.runs-on }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+      
+      - name: Create Changes file
+        run: |
+          if [ ! -f Changes.md ]; then
+            echo "# Changes" > Changes.md
+            echo "" >> Changes.md
+            echo "## ${{ github.ref_name }} - $(date +%Y-%m-%d)" >> Changes.md
+            echo "" >> Changes.md
+            echo "### Added" >> Changes.md
+            echo "- Automated release" >> Changes.md
+          fi
+      
       - name: Build binary
         uses: houseabsolute/actions-rust-cross@v1
         with:
@@ -49,8 +58,31 @@ jobs:
           target: ${{ matrix.platform.target }}
           args: "--locked --release"
           strip: true
-      - name: Publish artifacts and release
+      
+      - name: Prepare artifacts
         uses: houseabsolute/actions-rust-release@v0
         with:
           executable-name: mde
           target: ${{ matrix.platform.target }}
+          changes-file: "Changes.md"
+      
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        if: matrix.platform.os-name == 'Linux-x86_64'
+        with:
+          tag_name: ${{ github.ref }}
+          release_name: Release ${{ github.ref }}
+          body: |
+            Automated release for ${{ github.ref }}
+            
+            **Downloads:**
+            - Linux x86_64
+            - Linux aarch64  
+            - Linux riscv64
+            - Windows x86_64
+            - macOS x86_64
+            - FreeBSD x86_64
+          files: |
+            target/artifacts/*
+          draft: false
+          prerelease: false
