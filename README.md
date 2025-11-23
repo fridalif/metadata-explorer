@@ -1,5 +1,13 @@
 # metadata-explorer
 
+# Building
+
+```Shell
+cargo build --release
+
+#after tool in target directory
+```
+
 # Usage
 
 ```Shell
